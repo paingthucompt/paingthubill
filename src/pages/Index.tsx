@@ -20,10 +20,26 @@ const Index = () => {
 
   useEffect(() => {
     const checkAuth = async () => {
-      const { supabase } = await import("@/integrations/supabase/client");
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session) {
+      // If we already have our own auth token (backend JWT), prefer that and avoid importing Supabase
+      const localToken = localStorage.getItem("authToken");
+      if (localToken) {
         navigate("/dashboard");
+        return;
+      }
+
+      // Only attempt to import the Supabase client if the environment variables are present.
+      // This avoids runtime errors when the app is deployed without Supabase config.
+      if (!import.meta.env.VITE_SUPABASE_URL || !import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY) return;
+
+      try {
+        const { supabase } = await import("@/integrations/supabase/client");
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session) {
+          navigate("/dashboard");
+        }
+      } catch (e) {
+        // Ignore supabase import/session errors on the landing page; user can still sign in via the app's auth.
+        console.debug("Supabase auth check skipped:", e);
       }
     };
     checkAuth();

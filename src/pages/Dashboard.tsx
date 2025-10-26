@@ -1,41 +1,43 @@
 import { useState, useEffect } from "react";
-import { supabase } from "@/integrations/supabase/client";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
-import { LogOut, Users, Receipt, FileText } from "lucide-react";
+import { LogOut, Users, Receipt, FileText, Settings } from "lucide-react";
 import ClientsTab from "@/components/dashboard/ClientsTab";
 import TransactionsTab from "@/components/dashboard/TransactionsTab";
 import InvoicesTab from "@/components/dashboard/InvoicesTab";
+import AdminDashboard from "@/components/dashboard/AdminDashboard";
+import { jwtDecode } from "jwt-decode";
 
 const Dashboard = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
   const [loading, setLoading] = useState(true);
+  const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
-    const checkAuth = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        navigate("/auth");
-      } else {
-        setLoading(false);
-      }
-    };
-    checkAuth();
+    const token = localStorage.getItem("authToken");
+    if (!token) {
+      navigate("/auth");
+      return;
+    }
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (!session) {
-        navigate("/auth");
-      }
-    });
-
-    return () => subscription.unsubscribe();
+    try {
+      const decoded = jwtDecode<{ role: string }>(token);
+      setIsAdmin(decoded.role === "admin");
+    } catch (error) {
+      console.error("Invalid token:", error);
+      localStorage.removeItem("authToken");
+      navigate("/auth");
+      return;
+    }
+    
+    setLoading(false);
   }, [navigate]);
 
   const handleSignOut = async () => {
-    await supabase.auth.signOut();
+    localStorage.removeItem("authToken");
     toast({
       title: "Signed out",
       description: "You have been signed out successfully.",
@@ -72,8 +74,14 @@ const Dashboard = () => {
       </header>
 
       <main className="container mx-auto px-4 py-8">
-        <Tabs defaultValue="clients" className="space-y-6">
-          <TabsList className="grid w-full max-w-md grid-cols-3">
+        <Tabs defaultValue={isAdmin ? "admin" : "clients"} className="space-y-6">
+          <TabsList className="grid w-full max-w-md grid-cols-4">
+            {isAdmin && (
+              <TabsTrigger value="admin" className="flex items-center gap-2">
+                <Settings className="w-4 h-4" />
+                Admin
+              </TabsTrigger>
+            )}
             <TabsTrigger value="clients" className="flex items-center gap-2">
               <Users className="w-4 h-4" />
               Clients
@@ -87,6 +95,12 @@ const Dashboard = () => {
               Invoices
             </TabsTrigger>
           </TabsList>
+
+          {isAdmin && (
+            <TabsContent value="admin">
+              <AdminDashboard />
+            </TabsContent>
+          )}
 
           <TabsContent value="clients">
             <ClientsTab />

@@ -9,7 +9,7 @@
 This repository contains:
 - ✅ **Frontend Application** - React + Vite + TypeScript + shadcn/ui + Tailwind CSS
 - ✅ **Database Schema** - SQL migrations for PostgreSQL (in `/supabase/migrations/`)
-- ❌ **Backend Server** - **NOT INCLUDED** (originally used Supabase/Lovable Cloud)
+- ✅ **Backend Server** - Custom Express + PostgreSQL API (see `/backend`)
 
 **Important:** To self-host this application, you need to build a custom backend API server that implements the required endpoints and business logic described in this guide.
 
@@ -169,6 +169,57 @@ Here's the typical workflow for using Invoice Craftsman:
    Open `http://localhost:8080` in your browser.
 
 **Note:** The frontend requires a running backend API to function properly. See the next section for backend setup.
+
+---
+
+## Provided Express Backend Quickstart
+
+This repository now ships with a ready-to-run Express + PostgreSQL backend under `/backend`. Use this service if you want a managed SaaS workflow without rebuilding the entire API layer.
+
+### 1. Configure Environment
+
+Create `/backend/.env` with:
+
+```env
+DATABASE_URL=postgresql://user:password@host:5432/invoice_craftsman
+JWT_SECRET=change-me
+PORT=3000
+NODE_ENV=development
+```
+
+### 2. Apply Database Migrations
+
+```bash
+for file in $(ls supabase/migrations/*.sql | sort); do
+  psql "$DATABASE_URL" -f "$file"
+done
+```
+
+Migrations include:
+- `public.users` table with subscription metadata
+- `user_id` ownership columns on clients, transactions, invoices
+- Automatic invoice numbering (`PT-000001`)
+- Guard rails to prevent cross-tenant access
+
+### 3. Install & Run
+
+```bash
+cd backend
+npm install
+npm run dev           # or npm start in production
+```
+
+### 4. Seed Admin
+
+```bash
+node backend/createAdmin.js
+```
+
+Login with the seeded credentials and call:
+- `POST /api/admin/users` to create tenants (`subscription_days` optional)
+- `PUT /api/admin/users/:id/suspend` / `reactivate` to manage billing status
+
+All resource endpoints (`/api/clients`, `/api/transactions`, `/api/invoices`) require a Bearer token and automatically scope data to the authenticated user.
 
 ---
 

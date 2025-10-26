@@ -1,6 +1,7 @@
-import { useState, useEffect } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { useState, useEffect, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
+import { fetchWithAuth } from "@/lib/auth";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -47,29 +48,78 @@ const ClientsTab = () => {
   const [platformDetails, setPlatformDetails] = useState<PlatformDetail[]>([]);
   const [newPlatform, setNewPlatform] = useState({ platform_name: "", payout_id: "" });
   const { toast } = useToast();
+  const navigate = useNavigate();
 
-  useEffect(() => {
-    fetchClients();
-  }, []);
+  const redirectToAuth = useCallback(() => {
+    localStorage.removeItem("authToken");
+    navigate("/auth");
+  }, [navigate]);
 
-  const fetchClients = async () => {
+  const getTokenOrRedirect = useCallback(() => {
+    const token = localStorage.getItem("authToken");
+    if (!token) {
+      redirectToAuth();
+      throw new Error("Authentication required");
+    }
+    return token;
+  }, [redirectToAuth]);
+
+  const handleAuthFailure = useCallback(() => {
+    toast({
+      title: "Session expired",
+      description: "Please sign in again.",
+      variant: "destructive",
+    });
+    redirectToAuth();
+  }, [redirectToAuth, toast]);
+
+  const fetchClients = useCallback(async () => {
+    setLoading(true);
     try {
-      const { data, error } = await supabase
-        .from("clients")
-        .select("*")
-        .order("created_at", { ascending: false });
-
-      if (error) throw error;
-      setClients((data || []) as unknown as Client[]);
+      const response = await fetchWithAuth("/api/clients");
+      const data = await response.json();
+      setClients((data || []) as Client[]);
     } catch (error: any) {
       toast({
         title: "Error",
-        description: error.message,
+        description: error.message || "Failed to fetch clients",
         variant: "destructive",
       });
     } finally {
       setLoading(false);
     }
+  }, [toast]);
+
+  useEffect(() => {
+    fetchClients();
+  }, [fetchClients]);
+
+  const resetFormState = () => {
+    setOpen(false);
+    setEditingClient(null);
+    setFormData({ name: "", phone: "", commission_percentage: "0", preferred_payout_currency: "THB" });
+    setBankAccounts([]);
+    setPlatformDetails([]);
+    setNewBank({ bank_name: "", account_number: "", account_name: "" });
+    setNewPlatform({ platform_name: "", payout_id: "" });
+  };
+
+  const submitClient = async (method: "POST" | "PUT", endpoint: string, payload: unknown) => {
+    const response = await fetchWithAuth(endpoint, {
+      method,
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.json().catch(() => null);
+      const message = errorBody?.message || "Request failed.";
+      throw new Error(message);
+    }
+
+    return response.json().catch(() => null);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -77,42 +127,49 @@ const ClientsTab = () => {
     setLoading(true);
 
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error("Not authenticated");
+      const trimmedName = formData.name.trim();
+      if (!trimmedName) {
+        toast({
+          title: "Missing name",
+          description: "Client name is required.",
+          variant: "destructive",
+        });
+        setLoading(false);
+        return;
+      }
+
+      const commissionValue = parseFloat(formData.commission_percentage);
+      const safeCommission = Number.isFinite(commissionValue) ? commissionValue : 0;
 
       const clientData = {
-        name: formData.name,
-        phone: formData.phone || null,
-        bank_account: bankAccounts.length > 0 ? (bankAccounts as any) : null,
-        platform_details: platformDetails.length > 0 ? (platformDetails as any) : null,
-        commission_percentage: parseFloat(formData.commission_percentage),
+        name: trimmedName,
+        phone: formData.phone.trim() || null,
+        bank_account: bankAccounts.length > 0 ? bankAccounts : null,
+        platform_details: platformDetails.length > 0 ? platformDetails : null,
+        commission_percentage: safeCommission,
         preferred_payout_currency: formData.preferred_payout_currency,
-        user_id: user.id,
       };
 
       if (editingClient) {
-        const { error } = await supabase
-          .from("clients")
-          .update(clientData)
-          .eq("id", editingClient.id);
-        if (error) throw error;
+        const result = await submitClient("PUT", `/api/clients/${editingClient.id}`, clientData);
+        if (result === null) {
+          return;
+        }
         toast({ title: "Success", description: "Client updated successfully" });
       } else {
-        const { error } = await supabase.from("clients").insert([clientData]);
-        if (error) throw error;
+        const result = await submitClient("POST", "/api/clients", clientData);
+        if (result === null) {
+          return;
+        }
         toast({ title: "Success", description: "Client added successfully" });
       }
 
-      setOpen(false);
-      setEditingClient(null);
-      setFormData({ name: "", phone: "", commission_percentage: "0", preferred_payout_currency: "THB" });
-      setBankAccounts([]);
-      setPlatformDetails([]);
-      setNewBank({ bank_name: "", account_number: "", account_name: "" });
-      setNewPlatform({ platform_name: "", payout_id: "" });
-      fetchClients();
+      resetFormState();
+      await fetchClients();
     } catch (error: any) {
-      toast({ title: "Error", description: error.message, variant: "destructive" });
+      if (error.message !== "Authentication required") {
+        toast({ title: "Error", description: error.message, variant: "destructive" });
+      }
     } finally {
       setLoading(false);
     }
@@ -124,46 +181,68 @@ const ClientsTab = () => {
       name: client.name,
       phone: client.phone || "",
       commission_percentage: client.commission_percentage.toString(),
-      preferred_payout_currency: client.preferred_payout_currency || "THB",
+      preferred_payout_currency: client.preferred_payout_currency,
     });
     setBankAccounts(client.bank_account || []);
     setPlatformDetails(client.platform_details || []);
     setOpen(true);
   };
 
-  const addBankAccount = () => {
-    if (newBank.bank_name.trim() && newBank.account_number.trim() && newBank.account_name.trim()) {
-      setBankAccounts([...bankAccounts, newBank]);
-      setNewBank({ bank_name: "", account_number: "", account_name: "" });
+  const handleDelete = async (id: string) => {
+    setLoading(true);
+    try {
+      const response = await fetchWithAuth(`/api/clients/${id}`, {
+        method: "DELETE",
+      });
+
+      if (!response.ok) {
+        const errorBody = await response.json().catch(() => null);
+        const message = errorBody?.message || "Failed to delete client.";
+        throw new Error(message);
+      }
+
+      toast({ title: "Success", description: "Client removed successfully" });
+      await fetchClients();
+    } catch (error: any) {
+      toast({ title: "Error", description: error.message || "Failed to delete client", variant: "destructive" });
+    } finally {
+      setLoading(false);
     }
+  };
+
+  const addBankAccount = () => {
+    if (!newBank.bank_name || !newBank.account_number || !newBank.account_name) {
+      toast({
+        title: "Missing details",
+        description: "Please fill in all bank account fields.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setBankAccounts(prev => [...prev, newBank]);
+    setNewBank({ bank_name: "", account_number: "", account_name: "" });
   };
 
   const removeBankAccount = (index: number) => {
-    setBankAccounts(bankAccounts.filter((_, i) => i !== index));
+    setBankAccounts(prev => prev.filter((_, idx) => idx !== index));
   };
 
   const addPlatformDetail = () => {
-    if (newPlatform.platform_name.trim()) {
-      setPlatformDetails([...platformDetails, newPlatform]);
-      setNewPlatform({ platform_name: "", payout_id: "" });
+    if (!newPlatform.platform_name) {
+      toast({
+        title: "Missing details",
+        description: "Please provide a platform name.",
+        variant: "destructive",
+      });
+      return;
     }
+    setPlatformDetails(prev => [...prev, { platform_name: newPlatform.platform_name, payout_id: newPlatform.payout_id || undefined }]);
+    setNewPlatform({ platform_name: "", payout_id: "" });
   };
 
   const removePlatformDetail = (index: number) => {
-    setPlatformDetails(platformDetails.filter((_, i) => i !== index));
-  };
-
-  const handleDelete = async (id: string) => {
-    if (!confirm("Are you sure you want to delete this client?")) return;
-
-    try {
-      const { error } = await supabase.from("clients").delete().eq("id", id);
-      if (error) throw error;
-      toast({ title: "Success", description: "Client deleted successfully" });
-      fetchClients();
-    } catch (error: any) {
-      toast({ title: "Error", description: error.message, variant: "destructive" });
-    }
+    setPlatformDetails(prev => prev.filter((_, idx) => idx !== index));
   };
 
   return (
@@ -172,163 +251,145 @@ const ClientsTab = () => {
         <div className="flex items-center justify-between">
           <div>
             <CardTitle>Clients</CardTitle>
-            <CardDescription>Manage your client information</CardDescription>
+            <CardDescription>Manage your clients and payout preferences</CardDescription>
           </div>
           <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger asChild>
-                <Button onClick={() => {
-                setEditingClient(null);
-                setFormData({ name: "", phone: "", commission_percentage: "0", preferred_payout_currency: "THB" });
-                setBankAccounts([]);
-                setPlatformDetails([]);
-                setNewBank({ bank_name: "", account_number: "", account_name: "" });
-                setNewPlatform({ platform_name: "", payout_id: "" });
-              }}>
+              <Button disabled={loading}>
                 <Plus className="w-4 h-4 mr-2" />
-                Add Client
+                {editingClient ? "Edit Client" : "Add Client"}
               </Button>
             </DialogTrigger>
-            <DialogContent>
+            <DialogContent className="sm:max-w-2xl">
               <DialogHeader>
-                <DialogTitle>{editingClient ? "Edit Client" : "Add New Client"}</DialogTitle>
+                <DialogTitle>{editingClient ? "Edit client" : "Add new client"}</DialogTitle>
               </DialogHeader>
               <form onSubmit={handleSubmit} className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="name">Name *</Label>
-                  <Input
-                    id="name"
-                    value={formData.name}
-                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                    required
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="phone">Phone</Label>
-                  <Input
-                    id="phone"
-                    value={formData.phone}
-                    onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Bank Accounts</Label>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    {bankAccounts.map((account, index) => (
-                      <div key={index} className="flex items-center gap-2 p-2 border rounded">
-                        <div className="flex-1">
-                          <p className="font-medium text-sm">{account.bank_name}</p>
-                          <p className="text-xs text-muted-foreground">{account.account_number}</p>
-                          <p className="text-xs text-muted-foreground">{account.account_name}</p>
-                        </div>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => removeBankAccount(index)}
-                        >
-                          <X className="w-4 h-4" />
-                        </Button>
-                      </div>
-                    ))}
-                    <div className="flex flex-col gap-2">
-                      <div className="flex gap-2">
-                        <Input
-                          placeholder="Bank Name (e.g., KBANK)"
-                          value={newBank.bank_name}
-                          onChange={(e) => setNewBank({ ...newBank, bank_name: e.target.value })}
-                        />
-                        <Input
-                          placeholder="Account Number"
-                          value={newBank.account_number}
-                          onChange={(e) => setNewBank({ ...newBank, account_number: e.target.value })}
-                        />
-                      </div>
-                      <div className="flex gap-2">
-                        <Input
-                          placeholder="Account Name"
-                          value={newBank.account_name}
-                          onChange={(e) => setNewBank({ ...newBank, account_name: e.target.value })}
-                          className="flex-1"
-                        />
-                        <Button type="button" variant="outline" onClick={addBankAccount}>
-                          <Plus className="w-4 h-4" />
-                        </Button>
-                      </div>
-                    </div>
+                    <Label htmlFor="name">Client Name</Label>
+                    <Input
+                      id="name"
+                      value={formData.name}
+                      onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
+                      required
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="phone">Phone</Label>
+                    <Input
+                      id="phone"
+                      value={formData.phone}
+                      onChange={(e) => setFormData(prev => ({ ...prev, phone: e.target.value }))}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="commission">Commission %</Label>
+                    <Input
+                      id="commission"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={formData.commission_percentage}
+                      onChange={(e) => setFormData(prev => ({ ...prev, commission_percentage: e.target.value }))}
+                      required
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="currency">Preferred Currency</Label>
+                    <Select
+                      value={formData.preferred_payout_currency}
+                      onValueChange={(value) => setFormData(prev => ({ ...prev, preferred_payout_currency: value }))}
+                    >
+                      <SelectTrigger id="currency">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="THB">THB (Thai Baht)</SelectItem>
+                        <SelectItem value="MMK">MMK (Myanmar Kyat)</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
                 </div>
-                <div className="space-y-2">
-                  <Label>Platform Details</Label>
-                  <div className="space-y-2">
-                    {platformDetails.map((platform, index) => (
-                      <div key={index} className="flex items-center gap-2 p-2 border rounded">
-                        <div className="flex-1">
-                          <p className="font-medium text-sm">{platform.platform_name}</p>
-                          {platform.payout_id && <p className="text-xs text-muted-foreground">{platform.payout_id}</p>}
-                        </div>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => removePlatformDetail(index)}
-                        >
-                          <X className="w-4 h-4" />
-                        </Button>
-                      </div>
-                    ))}
-                    <div className="flex gap-2">
-                      <Select value={newPlatform.platform_name} onValueChange={(value) => setNewPlatform({ ...newPlatform, platform_name: value })}>
-                        <SelectTrigger className="flex-1">
-                          <SelectValue placeholder="Select platform" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="Facebook">Facebook</SelectItem>
-                          <SelectItem value="YouTube">YouTube</SelectItem>
-                          <SelectItem value="TikTok">TikTok</SelectItem>
-                          <SelectItem value="Instagram">Instagram</SelectItem>
-                          <SelectItem value="Other">Other</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <Input
-                        placeholder="Payout ID"
-                        value={newPlatform.payout_id}
-                        onChange={(e) => setNewPlatform({ ...newPlatform, payout_id: e.target.value })}
-                        className="flex-1"
-                      />
-                      <Button type="button" variant="outline" onClick={addPlatformDetail}>
-                        <Plus className="w-4 h-4" />
-                      </Button>
-                    </div>
+
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <Label>Bank Accounts</Label>
+                    <Button type="button" variant="outline" size="sm" onClick={addBankAccount}>
+                      Add bank
+                    </Button>
                   </div>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                    <Input
+                      placeholder="Bank name"
+                      value={newBank.bank_name}
+                      onChange={(e) => setNewBank(prev => ({ ...prev, bank_name: e.target.value }))}
+                    />
+                    <Input
+                      placeholder="Account number"
+                      value={newBank.account_number}
+                      onChange={(e) => setNewBank(prev => ({ ...prev, account_number: e.target.value }))}
+                    />
+                    <Input
+                      placeholder="Account holder name"
+                      value={newBank.account_name}
+                      onChange={(e) => setNewBank(prev => ({ ...prev, account_name: e.target.value }))}
+                    />
+                  </div>
+                  {bankAccounts.length > 0 && (
+                    <div className="space-y-2">
+                      {bankAccounts.map((account, index) => (
+                        <div key={index} className="flex items-center justify_between rounded border p-2 text-sm">
+                          <div>
+                            <p className="font-medium">{account.bank_name}</p>
+                            <p className="text-muted-foreground">{account.account_number}</p>
+                            <p className="text-muted-foreground text-xs">{account.account_name}</p>
+                          </div>
+                          <Button variant="ghost" size="icon" onClick={() => removeBankAccount(index)}>
+                            <X className="w-4 h-4" />
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="commission">Commission % *</Label>
-                  <Input
-                    id="commission"
-                    type="number"
-                    min="0"
-                    max="100"
-                    step="0.01"
-                    value={formData.commission_percentage}
-                    onChange={(e) => setFormData({ ...formData, commission_percentage: e.target.value })}
-                    required
-                  />
+
+                <div className="space-y-3">
+                  <div className="flex items-center justify_between">
+                    <Label>Platform Details</Label>
+                    <Button type="button" variant="outline" size="sm" onClick={addPlatformDetail}>
+                      Add platform
+                    </Button>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                    <Input
+                      placeholder="Platform name"
+                      value={newPlatform.platform_name}
+                      onChange={(e) => setNewPlatform(prev => ({ ...prev, platform_name: e.target.value }))}
+                    />
+                    <Input
+                      placeholder="Payout ID (optional)"
+                      value={newPlatform.payout_id}
+                      onChange={(e) => setNewPlatform(prev => ({ ...prev, payout_id: e.target.value }))}
+                    />
+                  </div>
+                  {platformDetails.length > 0 && (
+                    <div className="space-y-2">
+                      {platformDetails.map((platform, index) => (
+                        <div key={index} className="flex items-center justify_between rounded border p-2 text-sm">
+                          <div>
+                            <p className="font-medium">{platform.platform_name}</p>
+                            {platform.payout_id && <p className="text-muted-foreground text-xs">{platform.payout_id}</p>}
+                          </div>
+                          <Button variant="ghost" size="icon" onClick={() => removePlatformDetail(index)}>
+                            <X className="w-4 h-4" />
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="currency">Preferred Payout Currency *</Label>
-                  <Select
-                    value={formData.preferred_payout_currency}
-                    onValueChange={(value) => setFormData({ ...formData, preferred_payout_currency: value })}
-                  >
-                    <SelectTrigger id="currency">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="THB">THB (Thai Baht)</SelectItem>
-                      <SelectItem value="MMK">MMK (Myanmar Kyat)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+
                 <Button type="submit" className="w-full" disabled={loading}>
                   {loading ? "Saving..." : editingClient ? "Update Client" : "Add Client"}
                 </Button>
@@ -340,75 +401,75 @@ const ClientsTab = () => {
       <CardContent>
         <div className="rounded-md border">
           <Table>
-              <TableHeader>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Name</TableHead>
+                <TableHead>Phone</TableHead>
+                <TableHead>Bank Account</TableHead>
+                <TableHead>Platforms</TableHead>
+                <TableHead>Commission %</TableHead>
+                <TableHead>Currency</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {clients.length === 0 ? (
                 <TableRow>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Phone</TableHead>
-                  <TableHead>Bank Account</TableHead>
-                  <TableHead>Platforms</TableHead>
-                  <TableHead>Commission %</TableHead>
-                  <TableHead>Currency</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
+                  <TableCell colSpan={7} className="text-center text-muted-foreground">
+                    {loading ? "Loading clients..." : "No clients yet. Add your first client to get started."}
+                  </TableCell>
                 </TableRow>
-              </TableHeader>
-              <TableBody>
-                {clients.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={7} className="text-center text-muted-foreground">
-                      No clients yet. Add your first client to get started.
+              ) : (
+                clients.map((client) => (
+                  <TableRow key={client.id}>
+                    <TableCell className="font-medium">{client.name}</TableCell>
+                    <TableCell>{client.phone || "—"}</TableCell>
+                    <TableCell>
+                      {client.bank_account && Array.isArray(client.bank_account) && client.bank_account.length > 0 ? (
+                        <div className="space-y-1">
+                          {client.bank_account.map((account, idx) => (
+                            <div key={idx} className="text-sm">
+                              <span className="font-medium">{account.bank_name}:</span> {account.account_number}
+                              <div className="text-xs text-muted-foreground">{account.account_name}</div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : "—"}
+                    </TableCell>
+                    <TableCell>
+                      {client.platform_details && Array.isArray(client.platform_details) && client.platform_details.length > 0 ? (
+                        <div className="space-y-1">
+                          {client.platform_details.map((platform, idx) => (
+                            <div key={idx} className="text-sm">
+                              <span className="font-medium">{platform.platform_name}</span>
+                              {platform.payout_id && <span>: {platform.payout_id}</span>}
+                            </div>
+                          ))}
+                        </div>
+                      ) : "—"}
+                    </TableCell>
+                    <TableCell>{client.commission_percentage}%</TableCell>
+                    <TableCell>{client.preferred_payout_currency}</TableCell>
+                    <TableCell className="text-right">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleEdit(client)}
+                      >
+                        <Pencil className="w-4 h-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleDelete(client.id)}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
                     </TableCell>
                   </TableRow>
-                ) : (
-                  clients.map((client) => (
-                    <TableRow key={client.id}>
-                      <TableCell className="font-medium">{client.name}</TableCell>
-                      <TableCell>{client.phone || "—"}</TableCell>
-                      <TableCell>
-                        {client.bank_account && Array.isArray(client.bank_account) && client.bank_account.length > 0 ? (
-                          <div className="space-y-1">
-                            {client.bank_account.map((account, idx) => (
-                              <div key={idx} className="text-sm">
-                                <span className="font-medium">{account.bank_name}:</span> {account.account_number}
-                                <div className="text-xs text-muted-foreground">{account.account_name}</div>
-                              </div>
-                            ))}
-                          </div>
-                        ) : "—"}
-                      </TableCell>
-                      <TableCell>
-                        {client.platform_details && Array.isArray(client.platform_details) && client.platform_details.length > 0 ? (
-                          <div className="space-y-1">
-                            {client.platform_details.map((platform, idx) => (
-                              <div key={idx} className="text-sm">
-                                <span className="font-medium">{platform.platform_name}</span>
-                                {platform.payout_id && <span>: {platform.payout_id}</span>}
-                              </div>
-                            ))}
-                          </div>
-                        ) : "—"}
-                      </TableCell>
-                      <TableCell>{client.commission_percentage}%</TableCell>
-                      <TableCell>{client.preferred_payout_currency}</TableCell>
-                      <TableCell className="text-right">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleEdit(client)}
-                        >
-                          <Pencil className="w-4 h-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleDelete(client.id)}
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
+                ))
+              )}
+            </TableBody>
           </Table>
         </div>
       </CardContent>

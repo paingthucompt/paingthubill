@@ -1,57 +1,36 @@
 import { useState, useEffect } from "react";
-import { supabase } from "@/integrations/supabase/client";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
+import { login as loginWithAuth } from "@/lib/auth";
 import { FileText } from "lucide-react";
 
 const Auth = () => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [isSignUp, setIsSignUp] = useState(false);
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
   const { toast } = useToast();
 
   useEffect(() => {
-    const checkUser = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session) {
-        navigate("/dashboard");
-      }
-    };
-    checkUser();
+    const token = localStorage.getItem("authToken");
+    if (token) {
+      navigate("/dashboard");
+    }
   }, [navigate]);
 
-  const handleAuth = async (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
 
     try {
-      if (isSignUp) {
-        const { error } = await supabase.auth.signUp({
-          email,
-          password,
-          options: {
-            emailRedirectTo: `${window.location.origin}/dashboard`
-          }
-        });
-        if (error) throw error;
-        toast({
-          title: "Success!",
-          description: "Account created successfully. You can now sign in.",
-        });
-      } else {
-        const { error } = await supabase.auth.signInWithPassword({
-          email,
-          password,
-        });
-        if (error) throw error;
-        navigate("/dashboard");
-      }
+      // Use centralized auth helper which performs login, stores both access and refresh tokens,
+      // schedules silent refresh, and returns the login response. This avoids sending credentials twice.
+      await loginWithAuth(email, password);
+      navigate("/dashboard");
     } catch (error: any) {
       toast({
         title: "Error",
@@ -72,11 +51,11 @@ const Auth = () => {
           </div>
           <CardTitle className="text-2xl font-bold">Invoice Generator</CardTitle>
           <CardDescription>
-            {isSignUp ? "Create your account" : "Sign in to your account"}
+            Sign in to your account
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <form onSubmit={handleAuth} className="space-y-4">
+          <form onSubmit={handleLogin} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
               <Input
@@ -105,16 +84,11 @@ const Auth = () => {
               className="w-full"
               disabled={loading}
             >
-              {loading ? "Loading..." : isSignUp ? "Sign Up" : "Sign In"}
+              {loading ? "Loading..." : "Sign In"}
             </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              className="w-full"
-              onClick={() => setIsSignUp(!isSignUp)}
-            >
-              {isSignUp ? "Already have an account? Sign In" : "Need an account? Sign Up"}
-            </Button>
+            <p className="text-sm text-muted-foreground text-center">
+              Public sign-up မရှိပါ။ အကောင့်လိုအပ်ပါက Admin ကို ဆက်သွယ်ပါ။
+            </p>
           </form>
         </CardContent>
       </Card>
