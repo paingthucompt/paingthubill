@@ -7,6 +7,5 @@ CREATE TABLE IF NOT EXISTS users (
   password_hash TEXT NOT NULL,
   role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('user', 'admin')),
   subscription_status TEXT NOT NULL DEFAULT 'pending' CHECK (subscription_status IN ('active', 'suspended', 'pending')),
-  subscription_expiry_date TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );

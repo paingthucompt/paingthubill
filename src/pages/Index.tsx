@@ -27,20 +27,7 @@ const Index = () => {
         return;
       }
 
-      // Only attempt to import the Supabase client if the environment variables are present.
-      // This avoids runtime errors when the app is deployed without Supabase config.
-      if (!import.meta.env.VITE_SUPABASE_URL || !import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY) return;
-
-      try {
-        const { supabase } = await import("@/integrations/supabase/client");
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session) {
-          navigate("/dashboard");
-        }
-      } catch (e) {
-        // Ignore supabase import/session errors on the landing page; user can still sign in via the app's auth.
-        console.debug("Supabase auth check skipped:", e);
-      }
+      // No external auth client here — the app uses the custom backend JWT stored in localStorage.
     };
     checkAuth();
   }, [navigate]);

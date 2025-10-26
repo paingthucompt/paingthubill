@@ -16,9 +16,9 @@ async function main() {
     expiryDate.setFullYear(expiryDate.getFullYear() + 100);
 
     const insertSql = `
-      INSERT INTO users (email, password_hash, role, subscription_status, subscription_expiry_date)
-      VALUES ($1, $2, $3, $4, $5)
-      RETURNING id, email, role, subscription_status, subscription_expiry_date, created_at
+  INSERT INTO users (email, password_hash, role, subscription_status, subscription_end_date)
+  VALUES ($1, $2, $3, $4, $5)
+  RETURNING id, email, role, subscription_status, subscription_end_date, created_at
     `;
 
     const { rows } = await query(insertSql, [

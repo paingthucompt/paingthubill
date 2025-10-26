@@ -89,7 +89,7 @@ const PolicyPage = () => {
               </p>
               <ul className="list-disc pl-6 text-muted-foreground space-y-1">
                 <li><strong>Google AdSense:</strong> We use Google AdSense to display advertisements. Google may collect and use data about your visits to this and other websites to provide personalized ads. This may include the use of cookies and similar technologies.</li>
-                <li><strong>Service Providers:</strong> We use Lovable Cloud (powered by Supabase) for backend services, including authentication and data storage. Your data is securely stored and managed through this infrastructure.</li>
+                <li><strong>Service Providers:</strong> We use a self-hosted backend (Express + PostgreSQL) for authentication and data storage. Your data is stored on the server you or your administrator configures and is protected according to the security practices described below.</li>
                 <li><strong>Legal Requirements:</strong> We may disclose information if required by law or in response to valid legal requests.</li>
               </ul>
               <p className="text-muted-foreground mt-3">
@@ -104,7 +104,7 @@ const PolicyPage = () => {
               </p>
               <ul className="list-disc pl-6 text-muted-foreground space-y-1">
                 <li>Secure authentication with encrypted password storage</li>
-                <li>Row-level security policies to ensure users can only access their own data</li>
+                <li>Server-enforced per-user data isolation: the API validates user identity and scopes queries so users can only access their own clients, transactions, and invoices</li>
                 <li>HTTPS encryption for data transmission</li>
                 <li>Regular security updates and monitoring</li>
               </ul>

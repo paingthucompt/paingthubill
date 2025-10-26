@@ -35,7 +35,7 @@ router.get("/session", async (req, res) => {
       role: user.role,
       subscription: {
         status: user.subscription_status,
-        expiryDate: user.subscription_expiry_date
+        expiryDate: user.subscription_end_date
       }
     });
   } catch (error) {
@@ -160,7 +160,7 @@ router.post("/login", async (req, res) => {
         role: user.role,
         subscription: {
           status: user.subscription_status,
-          expiryDate: user.subscription_expiry_date
+          expiryDate: user.subscription_end_date
         }
       }
     });

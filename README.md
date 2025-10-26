@@ -1,5 +1,9 @@
 # Invoice Craftsman - Self-Hosting Guide
 
+> NOTE: This repository has been converted to use a custom Express + PostgreSQL backend
+> and no longer depends on Supabase. Supabase client code and environment variables
+> have been removed. The frontend should call the backend via `VITE_API_BASE_URL`.
+
 ## Project Overview
 
 **Invoice Craftsman** is a specialized invoice generator and payout management tool designed for freelancers and agencies handling multi-currency transactions (Thai Baht THB and Myanmar Kyat MMK). This application streamlines the entire workflow of managing client payouts, tracking transactions, calculating commissions automatically, and generating professional invoices.
@@ -729,13 +733,16 @@ VITE_API_BASE_URL=https://your-backend-api.com/api
 
 ---
 
-## Original Lovable Project
+## Notes on Supabase and Custom Backend
 
-This project was originally created with Lovable.dev and used Supabase backend.
+This repository previously contained Supabase-specific client code and configuration. The
+project has been migrated to a self-hosted model using a custom Express + PostgreSQL backend
+under the `/backend` folder. Supabase client integrations have been removed from the
+frontend and replaced by calls to the backend API (`/api/*`). Migration SQL files remain in
+`/supabase/migrations/` as plain SQL scripts for convenience and portability.
 
-**Original Project URL:** https://lovable.dev/projects/b83f4982-0452-4160-906e-525f2204918f
-
-To use the original Lovable Cloud backend, refer to the Lovable documentation or contact Lovable support.
+If you need to re-integrate with Supabase, the original project metadata is still available,
+but this repository is intended for use with the included Express backend.
 
 ---
 
